@@ -1,0 +1,35 @@
+Exponential Win Percentage
+----------------------------
+
+
+# The basics
+
+The adjacency matrix gives us an idea of who has beaten who, but we generally want to examine teams who haven't played each other.
+In this context we will want to take powers of the adjacency matrix to examine performance among common opponents.
+
+$$
+E=\SigmaA+ A^2/2! + A^3/3! +A^4/4!... =e^A-I
+$$
+
+Then we could do shit like THIS:
+
+```{r}
+expWin <- function(adj, schedDep=1){
+  library(expm)
+  #Exponential Adjacency matrix 
+  expAdj=expm(schedDep*adj)-diag(dim(adj)[1])
+
+  #Exponential based win pct
+  expAdj=expAdj/(expAdj+t(expAdj)) #Scale so that each cell represents a unit probability
+  
+  #Find the exponential win and loss record for each team
+  Exp=data.frame(name=row.names(adj), win=colSums(expAdj, na.rm=TRUE), loss=rowSums(expAdj, na.rm=TRUE)) 
+  #Scale to find exponential win percentage
+  Exp=as.numeric(Exp$win/(Exp$win+Exp$loss))
+  names(Exp)<-row.names(adj)
+  
+  return(list(expAdj, Exp))
+}
+```
+
+Ain't that some shit?
