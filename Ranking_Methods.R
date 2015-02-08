@@ -153,6 +153,45 @@ expWin <- function(adj, schedDep=1){
 }
 
 
+
+##########Optimal Explanation of Point Differences###########
+optimize<-function(games, pvar, h){
+  games$PTD=games$PTSH-games$PTSV
+  
+  #Starting point for team strength based on point differences
+  team=data.frame(name=unique(c(games$H,games$V)))
+  team=sqldf("Select name, avg(case when name=g.H then g.PTD else -g.PTD end) Mu 
+             from team join games g on g.H=name or g.V=name group by name")
+  
+  
+  x<-team$Mu
+  names(x)<-team$name
+  
+  likelihood<-function(x){
+    Game_p=attach_Pred_Rank(games,x,"Mu")$Mudiff
+    R=sum(dnorm(games$PTD, Game_p-h, sd=pvar, log=TRUE))
+    return(R)
+  }
+  
+  o<-optim(par=x, likelihood)
+  return(o$par)
+}
+
+
+##########Page Rank Bitches!!!###########
+pageW<-function(adj){
+  g<-graph.adjacency(adj)
+  win<-page.rank(g)$vector
+  return(win)
+}
+
+pageL<-function(adj){
+  lg<-graph.adjacency(t(adj))
+  lose<-page.rank(lg)$vector
+  return(lose)
+}
+
+
 #########Attach predictions to games###########
 attach_Pred_Matrix<- function(test, predMatrix, name){
   H=as.character(test$H)
@@ -168,8 +207,10 @@ attach_Pred_Matrix<- function(test, predMatrix, name){
 }
 
 
+games[games$SEAS==2005 & games$WEEK==10,]
+
 attach_Pred_Rank<- function(test, predRanking, name){
-  fill<-sum(predRanking)/nrow(predRanking)
+  fill<-mean(predRanking, na.rm=TRUE)
   predRanking[is.na(predRanking)] <- fill
   
   test[,paste("h",name,sep="")]=ifelse(test$H %in% names(predRanking), predRanking[test$H], fill)
@@ -198,6 +239,9 @@ createAdj<-function(train, homeAdv, ptWeight){
 }
 
 
+wk<-18
+sched=1
+
 #########Attach Exp, Collab, and Power ###############
 addPred=function(games, timeDep=0, ptWeight=FALSE, homeAdv=0, sched=1, startWeek=7){
   options(stringsAsFactors=FALSE)
@@ -216,22 +260,28 @@ addPred=function(games, timeDep=0, ptWeight=FALSE, homeAdv=0, sched=1, startWeek
       train=season[season$WEEK<wk,]
       test=season[season$WEEK==wk,]  
       
-      #Add SOS
-      sos<-SOS(train)
-      sos
-      #Create each measure
+      #Create the Adjacency Matrix with appropriate games weights
       adj<-createAdj(train, homeAdv, ptWeight)
+      
+      #Create each measure
+      #sos<-SOS(adj)
       exp<-expWin(adj, schedDep=sched)
       pow<-powerRanking(adj, schedWeight=sched*.5, Iterations=10)
       colab<-collaborativeFilter(adj)
+      opt<-optimize(train, pvar=10, h=homeAdv)
+      pWin<-pageW(adj)
+      pLoss<-pageL(adj)
         
       #Attach Measures to games
-      test<-attach_Pred_Rank(test,sos[[1]], "winp")
-      test<-attach_Pred_Rank(test,sos[[2]], "sos")
+      #test<-attach_Pred_Rank(test,sos[[1]], "winp")
+      #test<-attach_Pred_Rank(test,sos[[2]], "sos")
       test<-attach_Pred_Matrix(test,exp[[1]], "adj")
       test<-attach_Pred_Rank(test,exp[[2]], "exp")
       test<-attach_Pred_Rank(test,pow, "pow")
-      test<-attach_Pred_Matrix(test,colab,"colab") 
+      test<-attach_Pred_Matrix(test,colab,"colab")
+      test<-attach_Pred_Rank(test,opt,"opt")
+      test<-attach_Pred_Rank(test,pWin,"pageW")
+      test<-attach_Pred_Rank(test,pLoss,"pageL")
       
       #Append this season
       SEAShistory=rbind(SEAShistory, test)
@@ -242,64 +292,4 @@ addPred=function(games, timeDep=0, ptWeight=FALSE, homeAdv=0, sched=1, startWeek
 
 
 
-games<- read.csv("C:/Users/andrew.lutes/Desktop/Project/Football/College_Games.csv")
-games<- read.csv("C:/Users/andrew.lutes/Desktop/Project/Football/NFL_Games.csv")
-
-
-#######Test out differences##########
-games=games[games$WEEK<18 & games$SEAS==2013,]
-h<-NULL
-
-adj=createAdj(games, .2, FALSE)
-exp<-expWin(adj, schedDep=1)[[2]]
-h<-cbind(h,exp)
-train<-attach_Pred_Matrix(test,exp[[1]], "adj")
-test<-attach_Pred_Rank(test,exp[[2]], "exp")    
-
-
-games=games[games$WEEK<8 & games$SEAS==2000,]
-adj<-createAdj(games, .1, FALSE)
-collaborativeFilter(adj)
-pow<-powerRanking(adj, schedWeight=.5, Iterations=10)
-
-
-
-h<-mean((games$home_win*2-1)*games$Win_Margin)
-
-
-#######Overall Accuracy ######
-games=games[games$SEAS>2010,]
-games=createRandomSeasons(2,  home_adv=0,  variance=.01)
-  
-
-###Add the measures
-games=addPred(games, timeDep=0, ptWeight=FALSE, homeAdv=0, sched=1, startWeek=7)
-games$ptDiff=games$PTSH-games$PTSV
-#Scatter Plot Matrix
-scatterplot.matrix(~ptDiff+winpdiff+sosdiff+expdiff+adjdiff+powdiff+colabdiff, data=games, 
-                   reg.line=FALSE, smooth=FALSE, pch=16, col=c(rgb(0,0,1,.5),rgb(1,0,0,.5)), 
-                   groups=games$home_win)
-
-help(scatterplot.matrix)
-names(games)
-
-####Examine ROC Curves
-exp=roc(formula=home_win~expdiff, data=games)
-sos=roc(formula=home_win~sosdiff, data=games)
-win=roc(formula=home_win~winpdiff, data=games)
-spr=roc(formula=home_win~SPRV, data=games)
-adj=roc(formula=home_win~adjdiff, data=games)
-pow=roc(formula=home_win~powdiff, data=games)
-colab=roc(formula=home_win~colabdiff, data=games)
-plot.roc(win)
-plot.roc(spr, col="grey", add=TRUE)
-plot.roc(exp, add=TRUE, col="blue")
-plot.roc(adj, add=TRUE, col="red")
-plot.roc(colab, add=TRUE, col="purple")
-plot.roc(pow, add=TRUE, col="green")
-plot.roc(sos, add=TRUE, col="pink")
-
-
-plot3d(games$colabdiff, games$expdiff, games$winp, col=rgb(1-games$home_win,games$home_win,0), 
-       pch=16, alpha=.3, size=7)
 
