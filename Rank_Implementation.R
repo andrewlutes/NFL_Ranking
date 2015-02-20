@@ -1,6 +1,7 @@
 library(dplyr)
 library(igraph)
 library(expm)
+library(sqldf)
 
 ############Running the Algorithms#################
 #Create one of these data sets to work with
@@ -12,8 +13,6 @@ games=createRandomSeasons(2,  home_adv=0,  variance=.01)
 games$ptDiff=games$PTSH-games$PTSV
 games$WEEK<-games$WEEK-34
 games$winpdiff<-games$hWinP-games$vWinP
-
-
 
 ###Add the measures
 games=addPred(games, timeDep=0, ptWeight=TRUE, homeAdv=2, sched=1, startWeek=8)
